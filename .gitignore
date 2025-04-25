@@ -1,0 +1,20 @@
+# Ignore .pth, .pt, and .pkl files
+*.pth
+*.pt
+*.pkl
+
+# Ignore node_modules folder
+node_modules/
+
+# Ignore Python bytecode files
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore environment files
+.env
+.venv
+
+# Ignore any other temporary or log files
+*.log
+*.tmp

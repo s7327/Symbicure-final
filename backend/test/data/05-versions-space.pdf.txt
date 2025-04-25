@@ -1,0 +1,7 @@
+
+
+Patient Name: John Doe 
+Diagnosis: Acute Sinusitis 
+Prescription: Amoxicillin 500mg 
+ 
+ 

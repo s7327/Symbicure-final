@@ -1,0 +1,16 @@
+/* src/styles/chat.css */
+
+.user {
+    background-color: lightblue;
+    padding: 5px;
+    margin: 5px 0;
+    border-radius: 5px;
+  }
+  
+  .doctor {
+    background-color: lightgreen;
+    padding: 5px;
+    margin: 5px 0;
+    border-radius: 5px;
+  }
+  
