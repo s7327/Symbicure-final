@@ -48,19 +48,28 @@ MONGO_URI=your_mongodb_connection_string
 JWT_SECRET=your_jwt_secret
 ```
 
-### 4. Start the Backend Server
+
+### 4. Download the Pre-trained Models
+The AI-powered chatbot relies on pre-trained model files. Download the model files (.pkl and .pt) from Hugging Face:
+
+[Download the models here](https://huggingface.co/s7327/symbicure_models/tree/main)
+
+Once downloaded, place these model files in the following directory:
+
+
+### 5. Start the Backend Server
 ```bash
 cd backend
 npm run server
 ```
 
-### 5. Start the Frontend Server
+### 6. Start the Frontend Server
 ```bash
 cd frontend
 npm run dev
 ```
 
-### 6. **Chatbot Integration**
+### 7. **Chatbot Integration**
 The chatbot is integrated using an AI-powered API to assist users with booking and general queries.
 
 ## Contribution
