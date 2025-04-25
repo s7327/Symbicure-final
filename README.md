@@ -1,4 +1,4 @@
-# MediCure
+# SymbiCure
 
 MediCure is a **full-stack doctor appointment booking system** built using the **MERN stack**. It allows patients to search for nearby doctors based on specialization, location, and availability. The system also integrates a **chatbot** to assist users with queries and appointment-related assistance.
 
