@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 # ─── Configuration ─────────────────────────────────────────────────────────────
 DATASET_PATH = r"C:\Users\Ayan Jain\Downloads\reduced200final.csv"
-OUTPUT_DIR   = r"C:\Users\Ayan Jain\Desktop\Project\Meow\prescripto-full-stack\frontend\python_model_api"
+OUTPUT_DIR   = r"frontend\python_model_api"
 TOKENIZED_PKL = os.path.join(OUTPUT_DIR, "tokenized_data.pkl")
 LABEL_ENCODER_PKL = os.path.join(OUTPUT_DIR, "label_encoder.pkl")
 MAX_LENGTH   = 64

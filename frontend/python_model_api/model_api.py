@@ -8,8 +8,42 @@ import re
 from data_module import PubMedBERTClassifier
 from transformers import AutoTokenizer
 
+import google.generativeai as genai
+
+GEMINI_API_KEY="AIzaSyAaSpkiPU_6R9GXByu21NdzXsIWkRoD6W8"
+genai.configure(api_key=GEMINI_API_KEY)
+
+try:
+    models = genai.list_models()  # Correct method to get available models
+    print(models)
+except Exception as e:
+    print(f"Error fetching models: {e}")
+
+
+def get_gemini_explanation(disease, symptoms):
+    prompt = (
+    f"The following is the output from my healthcare model: '{disease}'.\n"
+    f"Write a single, empathetic, and informative paragraph that a healthcare assistant chatbot can directly send to a patient.\n"
+    f"The paragraph should be clear, human-like, and helpful, explaining what '{disease}' means in layman terms.\n"
+    f"Do not say things like 'waiting for input' or 'tell me more'. Instead, give a ready response that reassures the patient and encourages them to consult a doctor if needed.\n"
+    f"Keep the tone kind and supportive."
+)
+
+
+    try:
+        model = genai.GenerativeModel(model_name='models/gemini-2.5-flash-preview-04-17')
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print("Gemini API error:", e)
+        return "Sorry, no explanation could be retrieved at the moment."
+    
+    
+
+# Inside the /predict endpoint (after pred_label and confidence)
+
 # ─── Configuration ───────────────────────────────────────────────────
-MODEL_PATH = r"C:\Users\Ayan Jain\Downloads\best_model2200.pt"
+MODEL_PATH = r"frontend\python_model_api\best_model2200.pt"
 
 # Inspect checkpoint shapes (for debugging)
 import torch as _torch
@@ -17,8 +51,8 @@ _state = _torch.load(MODEL_PATH, map_location='cpu')
 for k, v in _state.items():
     print(f"Checkpoint param {k} : {v.shape}")
 
-LABEL_ENCODER_PATH = r"C:\Users\Ayan Jain\Desktop\Project\Meow\prescripto-full-stack\frontend\python_model_api\label_encoder.pkl"
-KW_TO_IDX_PATH = r"C:\Users\Ayan Jain\Desktop\Project\Meow\prescripto-full-stack\frontend\python_model_api\kw_to_idx.pkl"
+LABEL_ENCODER_PATH = r"frontend\python_model_api\label_encoder.pkl"
+KW_TO_IDX_PATH = r"frontend\python_model_api\kw_to_idx.pkl"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ─── App Initialization ─────────────────────────────────────────
@@ -52,13 +86,13 @@ def extract_keywords(text: str) -> list:
     return [kw for kw in keywords if kw in text]
 
 # ─── Prediction Endpoint ────────────────────────────────────
+# ─── Prediction Endpoint ────────────────────────────────────
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
         data = request.get_json()
         symptoms = data.get('symptoms', [])
 
-        # Log input
         print(f"Received symptoms input: {symptoms}")
 
         if not symptoms:
@@ -68,7 +102,6 @@ def predict():
         cleaned_text = clean_text(full_text)
         matched_keywords = extract_keywords(cleaned_text)
 
-        # Log matched keywords
         print(f"Matched keywords: {matched_keywords}")
 
         if not matched_keywords:
@@ -107,18 +140,23 @@ def predict():
             pred_label = label_encoder.inverse_transform([pred_idx])[0]
             confidence = torch.softmax(logits, dim=-1)[0][pred_idx].item()
 
-        # Log output
-        print(f"Prediction result → Disease: {pred_label}, Index: {pred_idx}, Confidence: {confidence}")
+        # ✅ Get Gemini explanation only AFTER pred_label is defined
+        gemini_explanation = get_gemini_explanation(pred_label, symptoms)
+
+        print(f"Prediction result → Disease: {pred_label}, Confidence: {confidence}")
+        print(f"Gemini explanation: {gemini_explanation}")
 
         return jsonify({
             "matched_keywords": matched_keywords,
             "predicted_disease": pred_label,
-            "confidence": confidence
+            "confidence": confidence,
+            "explanation": gemini_explanation
         })
 
     except Exception as e:
         print("Error during prediction:", str(e))
         return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

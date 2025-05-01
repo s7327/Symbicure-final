@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import SendIcon from '@mui/icons-material/Send';
-import AttachFileIcon from '@mui/icons-material/AttachFile';
 import ChatBubbleIcon from '@mui/icons-material/ChatBubble';
 import CloseIcon from '@mui/icons-material/Close';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -19,7 +18,6 @@ const HealthcareBot = () => {
     }
   }, [messages, isLoading]);
 
-  // Handle sending text messages to the backend
   const handleSendMessage = async (text) => {
     if (!text.trim()) return;
 
@@ -41,43 +39,21 @@ const HealthcareBot = () => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Server error');
 
-      // Build bot reply from actual fields
       let botReply = 'Sorry, no data';
       if (data.predicted_disease) {
         const conf = (data.confidence * 100).toFixed(1);
-        botReply = `i think you must be suffering from ${data.predicted_disease}`;
+        botReply = `I think you might be suffering from <strong>${data.predicted_disease}</strong>.`;
+
+        if (data.explanation) {
+          botReply += `<br/><br/><strong>Explanation:</strong> ${data.explanation}`;
+        }
       } else if (data.error) {
-        botReply = `Error: ${data.error}`;
+        botReply = `<strong>Error:</strong> ${data.error}`;
       }
 
       setMessages(prev => [...prev, { type: 'bot', content: botReply }]);
     } catch (error) {
-      setMessages(prev => [...prev, { type: 'error', content: `Error: ${error.message}` }]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Handle file uploads (if you add upload endpoint later)
-  const handleFileUpload = async () => {
-    const file = fileInputRef.current.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-    setMessages(prev => [...prev, { type: 'user', content: 'Uploading file...' }]);
-    setIsLoading(true);
-
-    try {
-      const response = await fetch('http://localhost:5000/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Upload failed');
-      setMessages(prev => [...prev, { type: 'bot', content: `File uploaded: ${data.message}` }]);
-    } catch (error) {
-      setMessages(prev => [...prev, { type: 'error', content: `Error: ${error.message}` }]);
+      setMessages(prev => [...prev, { type: 'error', content: `<strong>Error:</strong> ${error.message}` }]);
     } finally {
       setIsLoading(false);
     }
@@ -112,7 +88,7 @@ const HealthcareBot = () => {
                 <div className={`inline-block p-2 rounded-lg ${
                   msg.type === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-black'
                 }`}>
-                  {msg.content}
+                  <span dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br/>') }} />
                 </div>
               </div>
             ))}
@@ -136,9 +112,9 @@ const HealthcareBot = () => {
               <SendIcon />
             </button>
             <button onClick={() => fileInputRef.current.click()} className="p-2 rounded-full">
-              <AttachFileIcon />
+              {/* Reserved for file upload */}
             </button>
-            <input ref={fileInputRef} type="file" onChange={handleFileUpload} className="hidden" />
+            {/* <input ref={fileInputRef} type="file" onChange={handleFileUpload} className="hidden" /> */}
           </div>
         </div>
       )}

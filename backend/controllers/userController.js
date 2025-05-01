@@ -6,7 +6,6 @@ import doctorModel from "../models/doctorModel.js";
 import appointmentModel from "../models/appointmentModel.js";
 import { v2 as cloudinary } from 'cloudinary';
 import nodemailer from "nodemailer";
-
 // Nodemailer transporter setup - Ensure MAIL_ID and MAIL_PASS are in your .env
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -240,7 +239,7 @@ const bookAppointment = async (req, res) => {
         // --- Slot Booking Logic ---
         // Ensure slots_booked is initialized if it doesn't exist
         let slots_booked = docData.slots_booked || {};
-
+        console.log("Received slotDate:", slotDate);
         // Check if the specific date exists and the time slot is already booked
         if (slots_booked[slotDate] && slots_booked[slotDate].includes(slotTime)) {
             return res.status(409).json({ success: false, message: 'This time slot is already booked. Please select another.' }); // 409 Conflict
@@ -290,7 +289,7 @@ const bookAppointment = async (req, res) => {
                 subject: "Appointment Confirmation",
                 html: `
                     <h2>Hi ${userData.name},</h2>
-                    <p>Your appointment with <strong>Dr. ${docData.name}</strong> (${docData.speciality}) has been successfully booked.</p>
+                    <p>Your appointment with <strong> ${docData.name}</strong> (${docData.speciality}) has been successfully booked.</p>
                     <p><strong>Date:</strong> ${slotDate.replace(/_/g, '/')} <br/><strong>Time:</strong> ${slotTime}<br/><strong>Fees:</strong> ₹${docData.fees}</p>
                     <p>Thank you for choosing Symbicure!</p>
                 `
