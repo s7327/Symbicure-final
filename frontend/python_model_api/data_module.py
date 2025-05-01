@@ -9,12 +9,11 @@ from torch.utils.data import Dataset
 from sklearn.preprocessing import LabelEncoder
 from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
-
 # ─── Configuration ─────────────────────────────────────────────────────────────
-DATASET_PATH = r"C:\Users\Ayan Jain\Downloads\reduced200final.csv"
-OUTPUT_DIR   = r"C:\Users\Ayan Jain\Desktop\Project\Meow\prescripto-full-stack\frontend\python_model_api"
-TOKENIZED_PKL = os.path.join(OUTPUT_DIR, "tokenized_data.pkl")
-LABEL_ENCODER_PKL = os.path.join(OUTPUT_DIR, "label_encoder.pkl")
+DATASET_PATH = r"frontend\python_model_api\reduced200final.csv"
+OUTPUT_DIR   = r"frontend\python_model_api"
+TOKENIZED_PKL = os.path.join(OUTPUT_DIR, "tokenized_data112.pkl")
+LABEL_ENCODER_PKL = os.path.join(OUTPUT_DIR, "label_encoder112.pkl")
 MAX_LENGTH   = 64
 DEVICE       = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -158,47 +157,75 @@ class SymptomInferenceDataset(Dataset):
 
 
 # ─── Model ────────────────────────────────────────────────────────────────────
-from transformers import AutoModel
+
 
 class PubMedBERTClassifier(nn.Module):
     def __init__(self, num_labels: int, num_keywords: int):
         super().__init__()
+        # --- Base BERT Model ---
+        # NOTE: The checkpoint expects a vocab size of 119547, but this model has ~30522.
+        # Loading with strict=False will skip this layer, but it might affect performance
+        # if the tokenizer vocabulary doesn't align with the checkpoint's vocabulary.
+        # Ensure the tokenizer used NOW matches the one used when CREATING the checkpoint.
         self.bert = AutoModel.from_pretrained(
             "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext"
         )
-        # (optional) freeze early layers if you like
-        for p in list(self.bert.parameters())[:4*12]:
-            p.requires_grad = False
 
-        # ✏️ keyword_fc: 18 inputs → 48 outputs
-        self.keyword_fc = nn.Linear(num_keywords, 48)
+        # --- Freezing Early Layers (Optional but keep consistent with training) ---
+        # Assuming the checkpoint was trained with the first 4 layers frozen.
+        # If not, comment this part out.
+        num_layers_to_freeze = 4
+        # Each BERT layer typically has multiple parameter groups (self-attention, output, intermediate, etc.)
+        # A common approximation is 12-16 parameter groups per layer. Let's use 12 for simplicity.
+        # Adjust if you know the exact structure or number used during training.
+        parameters_per_layer_approx = 12
+        freeze_limit = num_layers_to_freeze * parameters_per_layer_approx
+        for i, p in enumerate(self.bert.parameters()):
+             if i < freeze_limit:
+                 p.requires_grad = False
+             else:
+                 # Ensure layers meant for fine-tuning *are* trainable if loading for inference
+                 # (though it doesn't matter much if model.eval() is called later)
+                 p.requires_grad = True
 
-        # ✏️ fc: (768 + 48) → 192
-        hidden_size = self.bert.config.hidden_size  # 768
-        self.fc = nn.Linear(hidden_size + 48, 192)
+        # --- Keyword Feature Processing ---
+        # Checkpoint expects output size 32
+        keyword_output_dim = 32 # <<< CORRECTED from 48
+        self.keyword_fc = nn.Linear(num_keywords, keyword_output_dim)
 
-        self.dropout = nn.Dropout(0.2)
+        # --- Combined Feature Projection ---
+        # Checkpoint expects output size 128 and input size 768 + 32 = 800
+        bert_hidden_size = self.bert.config.hidden_size  # Should be 768
+        combined_input_dim = bert_hidden_size + keyword_output_dim # 768 + 32 = 800
+        combined_output_dim = 128 # <<< CORRECTED from 192
+        self.fc = nn.Linear(combined_input_dim, combined_output_dim)
 
-        # ✏️ classifier: 192 → num_labels (265)
-        self.classifier = nn.Linear(192, num_labels)
+        # --- Dropout (Keep consistent with training) ---
+        self.dropout = nn.Dropout(0.2) # Assuming 0.2 was used in training
+
+        # --- Final Classifier ---
+        # Checkpoint expects input size 128
+        classifier_input_dim = combined_output_dim # 128
+        self.classifier = nn.Linear(classifier_input_dim, num_labels)
 
     def forward(self, input_ids, attention_mask, keyword_features):
-        # BERT pooled output is [batch, 768]
-        pooled = self.bert(input_ids=input_ids, attention_mask=attention_mask).pooler_output
+        # BERT pooled output -> [batch, 768]
+        bert_outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        pooled_output = bert_outputs.pooler_output
 
-        # keyword branch -> [batch, 48]
-        kw_out = torch.relu(self.keyword_fc(keyword_features))
+        # Keyword branch -> [batch, 32]
+        keyword_output = torch.relu(self.keyword_fc(keyword_features))
 
-        # concat -> [batch, 768+48=816]
-        x = torch.cat([pooled, kw_out], dim=1)
+        # Concatenate features -> [batch, 800]
+        combined_features = torch.cat([pooled_output, keyword_output], dim=1)
 
-        # project -> [batch, 192]
-        x = torch.relu(self.fc(x))
-        x = self.dropout(x)
+        # Project combined features -> [batch, 128]
+        projected_features = torch.relu(self.fc(combined_features))
+        projected_features = self.dropout(projected_features)
 
-        # final logits -> [batch, 265]
-        return self.classifier(x)
-
+        # Final classification logits -> [batch, num_labels]
+        logits = self.classifier(projected_features)
+        return logits
 
 # ─── Main Execution Block ─────────────────────────────────────────────────────
 if __name__ == "__main__":
