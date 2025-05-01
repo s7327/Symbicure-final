@@ -17,15 +17,15 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustc --version && cargo --version
 
 # Set working directory
-WORKDIR /app
+WORKDIR /app/python_model_api
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
+COPY frontend/python_model_api/requirements.txt .
 RUN pip install --upgrade pip setuptools wheel
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY frontend/python_model_api/ .
 
-# Define start command (adjust based on your app, e.g., Flask or FastAPI)
-CMD ["python", "app.py"]  # Replace with your actual entry point, e.g., "gunicorn app:app"
+# Define start command
+CMD ["python", "model_api.py"]
