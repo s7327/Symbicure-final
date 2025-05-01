@@ -3,23 +3,16 @@ from flask_cors import CORS
 import torch
 import torch.nn as nn
 import pickle
-import pandas as pd
 import re
 from data_module import PubMedBERTClassifier
 from transformers import AutoTokenizer
 from huggingface_hub import hf_hub_download
-
+import os
 import google.generativeai as genai
 
+# ─── Gemini API Setup ────────────────────────────────────────────────
 GEMINI_API_KEY = "AIzaSyAaSpkiPU_6R9GXByu21NdzXsIWkRoD6W8"
 genai.configure(api_key=GEMINI_API_KEY)
-
-try:
-    models = genai.list_models()  # Correct method to get available models
-    print(models)
-except Exception as e:
-    print(f"Error fetching models: {e}")
-
 
 def get_gemini_explanation(disease, symptoms):
     prompt = (
@@ -37,7 +30,7 @@ def get_gemini_explanation(disease, symptoms):
     except Exception as e:
         print("Gemini API error:", e)
         return "Sorry, no explanation could be retrieved at the moment."
-    
+
 
 # ─── Configuration ───────────────────────────────────────────────────
 # Load model, tokenizer, and encoder from Hugging Face
@@ -45,26 +38,24 @@ model_file = hf_hub_download(repo_id="s7327/symbicure-render", filename="best_mo
 label_file = hf_hub_download(repo_id="s7327/symbicure-render", filename="label_encoder.pkl")
 kw_file = hf_hub_download(repo_id="s7327/symbicure-render", filename="kw_to_idx.pkl")
 
-# Inspect checkpoint shapes (for debugging)
-import torch as _torch
-_state = _torch.load(model_file, map_location='cpu')
-for k, v in _state.items():
-    print(f"Checkpoint param {k} : {v.shape}")
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ─── App Initialization ─────────────────────────────────────────
 app = Flask(__name__)
 CORS(app)
 
-# ─── Load Encoders and Mappings ────────────────────────────────────────
+# ─── Load Tokenizer and Encoders ─────────────────────────────────────
+tokenizer = AutoTokenizer.from_pretrained(
+    "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext"
+)
+
 with open(label_file, "rb") as f:
     label_encoder = pickle.load(f)
 with open(kw_file, "rb") as f:
     kw_to_idx = pickle.load(f)
 
 # ─── Load Model Checkpoint and Build Model ───────────────────────────
-state_dict = torch.load(model_file, map_location=DEVICE, weights_only=False)
+state_dict = torch.load(model_file, map_location=DEVICE)
 model = PubMedBERTClassifier(num_labels=265, num_keywords=18)
 model.load_state_dict(state_dict, strict=False)
 model.to(DEVICE)
@@ -82,6 +73,7 @@ def extract_keywords(text: str) -> list:
         'breath', 'insomnia', 'palpitations', 'chest', 'nervousness', ""
     ]
     return [kw for kw in keywords if kw in text]
+
 
 # ─── Prediction Endpoint ────────────────────────────────────
 @app.route("/predict", methods=["POST"])
@@ -104,11 +96,7 @@ def predict():
         if not matched_keywords:
             return jsonify({"error": "No matching keywords found"}), 404
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext"
-        )
-
-        keyword_features = torch.zeros(len(kw_to_idx))
+        keyword_features = torch.zeros(len(kw_to_idx), dtype=torch.float32)
         for kw in matched_keywords:
             if kw in kw_to_idx:
                 keyword_features[kw_to_idx[kw]] = 1.0
@@ -137,10 +125,9 @@ def predict():
             pred_label = label_encoder.inverse_transform([pred_idx])[0]
             confidence = torch.softmax(logits, dim=-1)[0][pred_idx].item()
 
-        # ✅ Get Gemini explanation only AFTER pred_label is defined
         gemini_explanation = get_gemini_explanation(pred_label, symptoms)
 
-        print(f"Prediction result → Disease: {pred_label}, Confidence: {confidence}")
+        print(f"Prediction → Disease: {pred_label}, Confidence: {confidence}")
         print(f"Gemini explanation: {gemini_explanation}")
 
         return jsonify({
@@ -155,5 +142,7 @@ def predict():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── App Entry Point for Render ─────────────────────────────
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
