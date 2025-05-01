@@ -1,21 +1,42 @@
+# Core API
 Flask==3.1.0
 flask-cors==5.0.1
 gunicorn==21.2.0
+python-dotenv==1.0.1
+requests==2.32.3
+tqdm==4.67.1
+psutil==6.1.1
+logging  # standard library, no need to pip install
 
-# LLM & ML related
+# Data & ML
+pandas==2.2.3
+numpy<2.3  # ensures compatibility with PyTorch
+scikit-learn==1.6.1
+joblib==1.4.2
+
+# Hugging Face / Transformers
+torch==2.6.0
 transformers==4.49.0
-torch==2.2.2  # or an earlier version if 2.6 causes issues
 sentence-transformers==3.4.1
-scikit-learn==1.4.2
+huggingface-hub==0.29.1
+tokenizers==0.21.0
+safetensors==0.5.3
 
-# Google Gemini (if used)
+# Optional: Google Gemini (if used)
 google-generativeai==0.8.5
 google-api-python-client==2.169.0
 google-auth==2.39.0
 google-auth-httplib2==0.2.0
-protobuf==5.29.4
 googleapis-common-protos==1.70.0
+protobuf==5.29.4
 
-# Optional useful libs
-requests==2.32.3
-python-dotenv==1.0.1
+# Optional: PDF / Image handling
+pypdf==5.3.1
+Pillow==11.1.0
+
+# Optional: LangChain (if actually used in project)
+langchain==0.3.20
+langchain-community==0.3.19
+langchain-huggingface==0.1.2
+langchain-core==0.3.41
+langchain-text-splitters==0.3.6
