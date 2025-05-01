@@ -7,10 +7,11 @@ import pandas as pd
 import re
 from data_module import PubMedBERTClassifier
 from transformers import AutoTokenizer
+from huggingface_hub import hf_hub_download
 
 import google.generativeai as genai
 
-GEMINI_API_KEY="AIzaSyAaSpkiPU_6R9GXByu21NdzXsIWkRoD6W8"
+GEMINI_API_KEY = "AIzaSyAaSpkiPU_6R9GXByu21NdzXsIWkRoD6W8"
 genai.configure(api_key=GEMINI_API_KEY)
 
 try:
@@ -22,13 +23,12 @@ except Exception as e:
 
 def get_gemini_explanation(disease, symptoms):
     prompt = (
-    f"The following is the output from my healthcare model: '{disease}'.\n"
-    f"Write a single, empathetic, and informative paragraph that a healthcare assistant chatbot can directly send to a patient.\n"
-    f"The paragraph should be clear, human-like, and helpful, explaining what '{disease}' means in layman terms.\n"
-    f"Do not say things like 'waiting for input' or 'tell me more'. Instead, give a ready response that reassures the patient and encourages them to consult a doctor if needed.\n"
-    f"Keep the tone kind and supportive."
-)
-
+        f"The following is the output from my healthcare model: '{disease}'.\n"
+        f"Write a single, empathetic, and informative paragraph that a healthcare assistant chatbot can directly send to a patient.\n"
+        f"The paragraph should be clear, human-like, and helpful, explaining what '{disease}' means in layman terms.\n"
+        f"Do not say things like 'waiting for input' or 'tell me more'. Instead, give a ready response that reassures the patient and encourages them to consult a doctor if needed.\n"
+        f"Keep the tone kind and supportive."
+    )
 
     try:
         model = genai.GenerativeModel(model_name='models/gemini-2.5-flash-preview-04-17')
@@ -38,21 +38,19 @@ def get_gemini_explanation(disease, symptoms):
         print("Gemini API error:", e)
         return "Sorry, no explanation could be retrieved at the moment."
     
-    
-
-# Inside the /predict endpoint (after pred_label and confidence)
 
 # ─── Configuration ───────────────────────────────────────────────────
-MODEL_PATH = r"frontend\python_model_api\best_model2200.pt"
+# Load model, tokenizer, and encoder from Hugging Face
+model_file = hf_hub_download(repo_id="s7327/symbicure-render", filename="best_model2200.pt")
+label_file = hf_hub_download(repo_id="s7327/symbicure-render", filename="label_encoder.pkl")
+kw_file = hf_hub_download(repo_id="s7327/symbicure-render", filename="kw_to_idx.pkl")
 
 # Inspect checkpoint shapes (for debugging)
 import torch as _torch
-_state = _torch.load(MODEL_PATH, map_location='cpu')
+_state = _torch.load(model_file, map_location='cpu')
 for k, v in _state.items():
     print(f"Checkpoint param {k} : {v.shape}")
 
-LABEL_ENCODER_PATH = r"frontend\python_model_api\label_encoder.pkl"
-KW_TO_IDX_PATH = r"frontend\python_model_api\kw_to_idx.pkl"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ─── App Initialization ─────────────────────────────────────────
@@ -60,13 +58,13 @@ app = Flask(__name__)
 CORS(app)
 
 # ─── Load Encoders and Mappings ────────────────────────────────────────
-with open(LABEL_ENCODER_PATH, "rb") as f:
+with open(label_file, "rb") as f:
     label_encoder = pickle.load(f)
-with open(KW_TO_IDX_PATH.strip(), "rb") as f:
+with open(kw_file, "rb") as f:
     kw_to_idx = pickle.load(f)
 
 # ─── Load Model Checkpoint and Build Model ───────────────────────────
-state_dict = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
+state_dict = torch.load(model_file, map_location=DEVICE, weights_only=False)
 model = PubMedBERTClassifier(num_labels=265, num_keywords=18)
 model.load_state_dict(state_dict, strict=False)
 model.to(DEVICE)
@@ -81,11 +79,10 @@ def extract_keywords(text: str) -> list:
     keywords = [
         'pain', 'ache', 'fever', 'swelling', 'nausea', 'vomiting', 'headache',
         'cough', 'dizziness', 'fatigue', 'anxiety', 'depression', 'shortness',
-        'breath', 'insomnia', 'palpitations', 'chest', 'nervousness',""
+        'breath', 'insomnia', 'palpitations', 'chest', 'nervousness', ""
     ]
     return [kw for kw in keywords if kw in text]
 
-# ─── Prediction Endpoint ────────────────────────────────────
 # ─── Prediction Endpoint ────────────────────────────────────
 @app.route("/predict", methods=["POST"])
 def predict():
