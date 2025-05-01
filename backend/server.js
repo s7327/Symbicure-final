@@ -36,7 +36,7 @@ const port = process.env.PORT || 4000;
 const allowedOrigins = [
     process.env.USER_FRONTEND_URL || "http://localhost:5173", // User frontend
     process.env.ADMIN_FRONTEND_URL || "http://localhost:5174", // Admin/Doctor frontend
-    "https://symbicure-final.vercel.app/",  // Add Vercel frontend URL here
+    "https://symbicure-final.vercel.app",  // Add Vercel frontend URL here
     // Add other production URLs as needed
 ];
 
