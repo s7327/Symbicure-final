@@ -1,29 +1,31 @@
+from huggingface_hub import hf_hub_download
 import os
-import re
 import pickle
-import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset
+import re
 from sklearn.preprocessing import LabelEncoder
 from transformers import AutoTokenizer, AutoModel
+from torch.utils.data import Dataset
 from tqdm import tqdm
+import torch.nn as nn
 
-# ─── Configuration ─────────────────────────────────────────────────────────────
-DATASET_PATH = r"C:\Users\Ayan Jain\Downloads\reduced200final.csv"
-OUTPUT_DIR   = r"frontend\python_model_api"
-TOKENIZED_PKL = os.path.join(OUTPUT_DIR, "tokenized_data.pkl")
-LABEL_ENCODER_PKL = os.path.join(OUTPUT_DIR, "label_encoder.pkl")
-MAX_LENGTH   = 64
-DEVICE       = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# ─── Hugging Face Config ──────────────────────────────────────────────────────
+REPO_ID = "s7327/symbicure-rendery"  # Replace with your repo name
+FILENAME_CSV = "reduced200final.csv"
+FILENAME_TOKENIZED = "tokenized_data.pkl"
+FILENAME_ENCODER = "label_encoder.pkl"
+FILENAME_KW2IDX = "kw_to_idx.pkl"
+
+MAX_LENGTH = 64
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ─── Tokenizer ─────────────────────────────────────────────────────────────────
 tokenizer = AutoTokenizer.from_pretrained(
     "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext"
 )
 
-# ─── Text Processing ──────────────────────────────────────────────────────────
+# ─── Text Processing ───────────────────────────────────────────────────────────
 def clean_medical_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r'[^a-zA-Z0-9\-\s]', '', text)
@@ -37,6 +39,7 @@ def extract_symptom_keywords(text: str) -> list[str]:
     ]
     return [kw for kw in keywords if kw in text]
 
+# ─── Tokenization ──────────────────────────────────────────────────────────────
 def batch_tokenize(texts: list[str], batch_size: int = 500):
     tokenized = []
     for i in tqdm(range(0, len(texts), batch_size), desc="Tokenizing"):
@@ -53,45 +56,7 @@ def batch_tokenize(texts: list[str], batch_size: int = 500):
         ))
     return tokenized
 
-# ─── Data Loading ─────────────────────────────────────────────────────────────
-def load_and_preprocess_data():
-    df = pd.read_csv(DATASET_PATH)
-
-    # Clean and extract keywords
-    df['symptoms_text_cleaned'] = df['symptoms_text'].apply(clean_medical_text)
-    df['symptom_keywords'] = df['symptoms_text_cleaned'].apply(
-        lambda t: ','.join(extract_symptom_keywords(t))
-    )
-
-    # Tokenize and optionally load/save from/to .pkl
-    if os.path.exists(TOKENIZED_PKL):
-        with open(TOKENIZED_PKL, "rb") as f:
-            df["tokenized"] = pickle.load(f)
-    else:
-        df["tokenized"] = batch_tokenize(df["symptoms_text_cleaned"].tolist())
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        with open(TOKENIZED_PKL, "wb") as f:
-            pickle.dump(df["tokenized"].tolist(), f)
-
-    # Label encode the target variable
-    le = LabelEncoder()
-    df["label"] = le.fit_transform(df["disease"])
-    with open(LABEL_ENCODER_PKL, "wb") as f:
-        pickle.dump(le, f)
-
-    # Create dataset to extract keyword mappings
-    dataset = SymptomDataset(df)
-    
-    # Save keyword-to-index mapping
-    KW_TO_IDX_PATH = os.path.join(OUTPUT_DIR, "kw_to_idx.pkl")  # Add this line
-    with open(KW_TO_IDX_PATH, "wb",encoding="utf-8") as f:
-        pickle.dump(dataset.kw_to_idx, f)
-
-        print(dataset)
-
-    return df, le
-
-# ─── Dataset ─────────────────────────────────────────────────────────────────
+# ─── Dataset ───────────────────────────────────────────────────────────────────
 class SymptomDataset(Dataset):
     def __init__(self, df: pd.DataFrame):
         self.tokenized = df["tokenized"].tolist()
@@ -119,45 +84,48 @@ class SymptomDataset(Dataset):
             "attention_mask": attention_mask,
             "keyword_features": kw_feat,
             "label": label
-
-        }
-    
-class SymptomInferenceDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, tokenizer, kw_to_idx: dict, max_length: int = 64):
-        self.tokenizer = tokenizer
-        self.texts = df["symptoms_text_cleaned"]
-        self.keywords = [k.split(',') for k in df["symptom_keywords"]]
-        self.kw_to_idx = kw_to_idx
-        self.num_keywords = len(kw_to_idx)
-        self.max_length = max_length
-
-    def __len__(self):
-        return len(self.texts)
-
-    def __getitem__(self, idx):
-        enc = self.tokenizer(
-            self.texts.iloc[idx],
-            padding="max_length",
-            truncation=True,
-            max_length=self.max_length,
-            return_tensors="pt"
-        )
-        input_ids = enc["input_ids"].squeeze(0)
-        attention_mask = enc["attention_mask"].squeeze(0)
-
-        kw_feat = torch.zeros(self.num_keywords)
-        for kw in self.keywords[idx]:
-            if kw in self.kw_to_idx:
-                kw_feat[self.kw_to_idx[kw]] = 1.0
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "keyword_features": kw_feat
         }
 
+# ─── Data Loading from Hugging Face ────────────────────────────────────────────
+def load_and_preprocess_data():
+    # Download files from Hugging Face Hub
+    csv_path = hf_hub_download(repo_id=REPO_ID, filename=FILENAME_CSV)
+    tokenized_path = hf_hub_download(repo_id=REPO_ID, filename=FILENAME_TOKENIZED)
+    encoder_path = hf_hub_download(repo_id=REPO_ID, filename=FILENAME_ENCODER)
+    kw_to_idx_path = hf_hub_download(repo_id=REPO_ID, filename=FILENAME_KW2IDX)
 
-# ─── Model ────────────────────────────────────────────────────────────────────
+    # Load CSV and preprocess
+    df = pd.read_csv(csv_path)
+    df['symptoms_text_cleaned'] = df['symptoms_text'].apply(clean_medical_text)
+    df['symptom_keywords'] = df['symptoms_text_cleaned'].apply(
+        lambda t: ','.join(extract_symptom_keywords(t))
+    )
+
+    # Load tokenized data
+    with open(tokenized_path, "rb") as f:
+        df["tokenized"] = pickle.load(f)
+
+    # Load label encoder
+    with open(encoder_path, "rb") as f:
+        le = pickle.load(f)
+        df["label"] = le.transform(df["disease"])
+
+    # Create dataset to verify keyword mapping
+    dataset = SymptomDataset(df)
+
+    # Save keyword mapping
+    with open(kw_to_idx_path, "rb") as f:
+        kw_to_idx = pickle.load(f)
+
+    print("Sample keyword mappings:")
+    for i, (kw, idx) in enumerate(kw_to_idx.items()):
+        if i >= 5: break
+        print(f"{kw}: {idx}")
+
+    return df, le, kw_to_idx
+
+
+
 from transformers import AutoModel
 
 class PubMedBERTClassifier(nn.Module):
@@ -200,22 +168,8 @@ class PubMedBERTClassifier(nn.Module):
         return self.classifier(x)
 
 
-# ─── Main Execution Block ─────────────────────────────────────────────────────
+
+# ─── Main Execution ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Run preprocessing pipeline
-    print("Starting data preprocessing...")
-    df, le = load_and_preprocess_data()
-    
-    print("\nSuccessfully created:")
-    print(f"- {TOKENIZED_PKL}")
-    print(f"- {LABEL_ENCODER_PKL}")
-    print(f"- {os.path.join(OUTPUT_DIR, 'kw_to_idx.pkl')}")
-    
-    # Verify keyword mappings
-    with open(os.path.join(OUTPUT_DIR, "kw_to_idx.pkl"), "rb") as f:
-        kw_mappings = pickle.load(f)
-    
-    print("\nSample keyword mappings:")
-    for i, (kw, idx) in enumerate(kw_mappings.items()):
-        if i >= 5: break
-        print(f"{kw}: {idx}")
+    print("Loading from Hugging Face Hub...")
+    df, le, kw_to_idx = load_and_preprocess_data()
