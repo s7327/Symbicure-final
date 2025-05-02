@@ -34,11 +34,13 @@ const port = process.env.PORT || 4000;
 
 // --- Define Allowed Origins ---
 const allowedOrigins = [
-    process.env.USER_FRONTEND_URL || "https://symbicure-final.vercel.app", // User frontend URL on Vercel
-    process.env.ADMIN_FRONTEND_URL || "https://symbicure-final-admin.vercel.app", // Admin frontend URL on Vercel
-    "https://symbicure-final.onrender.com",  // Backend URL on Render
-    // Add other URLs if necessary
+    process.env.USER_FRONTEND_URL || "https://symbicure-final.vercel.app",         // ✅ Prod user frontend
+    process.env.ADMIN_FRONTEND_URL || "https://symbicure-final-admin.vercel.app", // ✅ Prod admin frontend
+    "https://symbicure-final.onrender.com",                                       // ✅ Render backend
+    "http://localhost:5173",                                                      // ✅ Local user frontend
+    "http://localhost:5174"                                                       // ✅ Local admin frontend (if any)
 ];
+
 
 
 // --- Middlewares ---
