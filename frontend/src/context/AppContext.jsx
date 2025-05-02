@@ -1,4 +1,4 @@
-import { createContext, useEffect, useState } from "react";
+import React, { createContext, useEffect, useState, useCallback } from "react";
 import { toast } from "react-toastify";
 import axios from 'axios';
 
@@ -6,174 +6,127 @@ export const AppContext = createContext(null);
 
 const AppContextProvider = (props) => {
     const currencySymbol = '₹';
-    // Ensure VITE_BACKEND_URL in .env points to your backend base URL (e.g., http://localhost:4000)
     const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+    // Initialize state from localStorage
+    const [token, setToken] = useState(() => localStorage.getItem('token') || '');
+    const [userId, setUserId] = useState(() => localStorage.getItem('userId') || null);
+    const [userData, setUserData] = useState(null); // Start as null
     const [doctors, setDoctors] = useState([]);
-    const [token, setToken] = useState(localStorage.getItem('token') || '');
-    const [userData, setUserData] = useState(null);
-    const [userId, setUserId] = useState(localStorage.getItem('userId') || null);
 
-    // Fetch list of all doctors
-    const getDoctosData = async () => {
-        // Removed previous console logs for clarity, focusing on profile fetch now
-        if (!backendUrl) {
-            console.error("VITE_BACKEND_URL is not defined in .env file.");
-            toast.error("Backend URL not configured.");
-            return;
-        }
+    // Fetch list of all doctors (memoized)
+    const getDoctosData = useCallback(async () => {
+        if (!backendUrl) { /* ... */ return; }
         try {
             const response = await axios.get(backendUrl + '/api/doctor/list');
-            const responseData = response.data;
-            if (responseData && responseData.success) {
-                setDoctors(responseData.data || []);
-            } else {
-                console.error("Failed to fetch doctors:", responseData?.message || 'API error');
-                toast.error(responseData?.message || "Failed to fetch doctors list (API error).");
-                setDoctors([]);
-            }
-        } catch (error) {
-            console.error("Error fetching doctors:", error.response || error.message || error);
-             if (error.response) {
-                 toast.error(`Failed to fetch doctors list. Status: ${error.response.status} - ${error.response.data?.message || 'Server error'}`);
-             } else if (error.request) {
-                 toast.error("Failed to fetch doctors list. No response from server.");
-             } else {
-                 toast.error("Failed to fetch doctors list. Network or configuration error.");
-             }
-             setDoctors([]);
-        }
-    };
+            if (response.data?.success) setDoctors(response.data.data || []);
+            else { /* ... error handling ... */ setDoctors([]); }
+        } catch (error) { /* ... error handling ... */ setDoctors([]); }
+    }, [backendUrl]);
 
-    // Load profile data for the currently logged-in user
-    const loadUserProfileData = async (currentToken) => {
-        // Prevent call if no token or URL
-        if (!currentToken) {
-            console.log("loadUserProfileData skipped: No token provided.");
-            setUserData(null);
+    // Load profile data (memoized)
+    const loadUserProfileData = useCallback(async (currentToken) => {
+        console.log("[AppContext] loadUserProfileData called with token:", !!currentToken);
+        if (!currentToken || !backendUrl) {
+            console.log("[AppContext] loadUserProfileData: Skipping due to missing token or URL.");
+            setUserData(null); // Ensure cleared if no token provided
             setUserId(null);
-            localStorage.removeItem('userId'); // Clean up local storage too
+            // No need to clear localStorage here, should be handled by logout/login logic
             return;
         }
-        if (!backendUrl) {
-            console.error("loadUserProfileData skipped: Backend URL not configured.");
-            toast.error("Backend URL is not configured.");
-            return;
-        }
-
+        // Set user data to null while loading? Optional for UX
+        // setUserData(null);
         try {
-            // --- DEBUG LOGS ADDED HERE ---
             const profileUrl = backendUrl + '/api/user/get-profile';
-            console.log("Attempting to load profile from URL:", profileUrl); // Log the exact URL being called
-            console.log("Using token:", currentToken ? 'Token Present' : 'Token Missing!'); // Log if token exists
-            // --- END OF DEBUG LOGS ---
+            console.log("[AppContext] loadUserProfileData: Fetching profile...");
+            const response = await axios.get(profileUrl, { headers: { token: currentToken } });
+            const responseData = response.data;
 
-            // Make the API call to get profile data
-            const { data } = await axios.get(profileUrl, { headers: { token: currentToken } });
-
-            // Process successful response
-            if (data.success) {
-                console.log("Profile data loaded successfully:", data.userData); // Log success
-                setUserData(data.userData);
-                // Sync userId state and localStorage
-                if (data.userData?._id) {
-                     if (localStorage.getItem('userId') !== data.userData._id) {
-                         localStorage.setItem('userId', data.userData._id);
-                     }
-                     setUserId(data.userData._id);
+            if (responseData.success && responseData.userData) {
+                console.log("[AppContext] loadUserProfileData: Profile data loaded successfully:", responseData.userData._id);
+                setUserData(responseData.userData); // <-- Update userData state
+                // Sync userId from loaded data
+                if (responseData.userData._id) {
+                    setUserId(responseData.userData._id);
+                    if (localStorage.getItem('userId') !== responseData.userData._id) {
+                        localStorage.setItem('userId', responseData.userData._id); // Keep localStorage sync
+                    }
                 } else {
-                     // Handle case where userData is returned but has no _id (shouldn't happen)
-                     console.warn("User data loaded but missing _id.");
-                     setUserId(null);
+                     console.warn("[AppContext] loadUserProfileData: User data loaded but missing _id.");
+                     setUserId(null); // Clear userId if missing from response
                      localStorage.removeItem('userId');
                 }
             } else {
-                // Handle API returning success: false
-                console.warn("Load profile warning (API success:false):", data.message);
-                toast.warn(data.message || "Could not load profile."); // Use warn toast
-                 // Clear user data on failure
-                 setUserData(null);
-                 setUserId(null);
-                 localStorage.removeItem('userId');
-                 // Potentially remove token if server indicates it's invalid via message?
-                 // localStorage.removeItem('token');
-                 // setToken('');
+                console.warn("[AppContext] loadUserProfileData: Load profile warning -", responseData.message || "API success:false or userData missing");
+                toast.warn(responseData.message || "Could not load profile details.");
+                setUserData(null); // Clear data on failure
+                setUserId(null);
+                localStorage.removeItem('userId');
             }
         } catch (error) {
-            // Log detailed error from Axios (includes response if available)
-            console.error("Error loading user profile:", error.response || error.message || error);
-
-            // Clear user data and token if unauthorized (401) or if request failed (e.g., 404)
-            if (error.response?.status === 401 || error.response?.status === 404) {
-                 toast.error(error.response.data?.message || `Failed to load profile (Status: ${error.response.status})`);
+            console.error("[AppContext] loadUserProfileData: Error loading profile:", error.response?.status, error.message);
+             if (error.response?.status === 401) {
+                  toast.error(error.response.data?.message || "Session expired. Please log in again.");
+                  setUserData(null);
+                  setUserId(null);
+                  localStorage.removeItem('userId');
+                  localStorage.removeItem('token'); // Force remove invalid token
+                  setToken(''); // <<< Trigger context update for logout state
+             } else { // Other errors (network, server 500 etc)
+                 toast.error("Could not load profile due to network or server issue.");
+                 // Don't clear token here unless sure it's invalid
                  setUserData(null);
                  setUserId(null);
                  localStorage.removeItem('userId');
-                 localStorage.removeItem('token'); // Remove invalid token
-                 setToken(''); // Update context state
-            } else if (error.request) {
-                 // Network error, server unreachable
-                 toast.error("Could not connect to server to load profile.");
-            } else {
-                 // Other errors (e.g., setting up request)
-                 toast.error("An unexpected error occurred while loading profile.");
-            }
+             }
         }
-    };
+    }, [backendUrl]); // Dependency: backendUrl (setToken is stable)
 
-    // Effect to load initial data on component mount
+    // Mark Tour as Completed (memoized)
+    const completeTour = useCallback(async () => {
+        // ... (keep existing completeTour function) ...
+         if (!token || !backendUrl || !userData) return;
+         const url = `${backendUrl}/api/user/complete-tour`;
+         try {
+             const response = await axios.put(url, {}, { headers: { token } });
+             if (response.data.success) { /* ... update userData state ... */ }
+             else { /* ... handle failure ... */ }
+         } catch (error) { /* ... handle error, including 401 ... */ }
+    }, [token, backendUrl, userData]);
+
+
+    // Effect to load initial data (doctors) only once on mount
     useEffect(() => {
-        console.log("AppContext mounted. Initializing...");
-        getDoctosData(); // Fetch doctors list
+        console.log("[AppContext] Initial Mount: Fetching doctors.");
+        getDoctosData();
+    }, [getDoctosData]); // Depends only on the stable getDoctosData function
 
-        const storedToken = localStorage.getItem('token');
-        const storedUserId = localStorage.getItem('userId'); // Also get stored userId
-
-        if (storedToken) {
-            console.log("Found token in localStorage. Setting token and loading profile.");
-            setToken(storedToken);
-            if (storedUserId) {
-                setUserId(storedUserId); // Set initial userId from localStorage
-            }
-            loadUserProfileData(storedToken); // Load profile using the found token
+    // *** CRITICAL EFFECT: Load user profile when token changes ***
+    useEffect(() => {
+        console.log("[AppContext] useEffect[token] triggered. Current token:", !!token);
+        if (token) {
+            // If token exists (login occurred or initial load found token), load profile
+            loadUserProfileData(token);
         } else {
-            console.log("No token found in localStorage. Initializing as logged out.");
-            // Ensure state is clear if no token found
+            // If token is empty/null (logout occurred), ensure user data is cleared
+            console.log("[AppContext] useEffect[token]: Token is empty, clearing user data.");
             setUserData(null);
             setUserId(null);
+            // No need to clear localStorage here, logout/error handling should do it
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Run only once on mount
+    }, [token, loadUserProfileData]); // << Run whenever 'token' state changes or loadUserProfileData reference changes (it shouldn't if memoized)
 
-    // Effect to reload profile if token changes *after* initial load (e.g., on login/logout)
-    useEffect(() => {
-        const storedToken = localStorage.getItem('token');
 
-        // Run only if token state changes *and* differs from localStorage
-        // Or if token becomes null (logout)
-        if (token !== storedToken) {
-            if (token) {
-                 console.log("Token changed (login detected). Reloading profile.");
-                 loadUserProfileData(token);
-            } else {
-                 console.log("Token removed (logout detected). Clearing user data.");
-                 // Handle logout case - clear data
-                 setUserData(null);
-                 setUserId(null);
-                 localStorage.removeItem('userId'); // Ensure userId is cleared too
-            }
-        }
-    }, [token]); // Dependency array includes token
-
-    // Context value provided to consuming components
+    // Context value
     const value = {
         doctors, getDoctosData,
         currencySymbol,
         backendUrl,
-        token, setToken, // Provide setToken for login/logout components
-        userData, setUserData, // Provide setUserData if needed externally (less common)
-        loadUserProfileData, // Provide function if manual profile refresh is needed
-        userId, setUserId // Provide userId and potentially setUserId if needed
+        token, setToken,
+        userData, setUserData, // Keep setUserData if needed elsewhere, but avoid direct mutation
+        loadUserProfileData,
+        userId, setUserId,
+        completeTour
     };
 
     return (

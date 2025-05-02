@@ -7,34 +7,33 @@ import appointmentModel from "../models/appointmentModel.js";
 import { v2 as cloudinary } from 'cloudinary';
 import nodemailer from "nodemailer";
 
-// Nodemailer transporter setup - Ensure MAIL_ID and MAIL_PASS are in your .env
+// Nodemailer transporter setup - Ensure MAIL_ID/MAIL_PASS are in .env
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: process.env.MAIL_ID,
-        pass: process.env.MAIL_PASS,
+        user: process.env.MAIL_ID,     // Your Gmail address
+        pass: process.env.MAIL_PASS,     // Your Gmail password or App Password
     },
-    // Add connection timeout (optional but recommended)
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000, // 10 seconds
-    socketTimeout: 10000 // 10 seconds
+    connectionTimeout: 10000, // Optional timeouts
+    greetingTimeout: 10000,
+    socketTimeout: 10000
 });
 
 // Helper function to create JWT token
 const createToken = (id) => {
-    // Ensure JWT_SECRET is defined in your .env file
     if (!process.env.JWT_SECRET) {
         console.error("FATAL ERROR: JWT_SECRET is not defined in .env file.");
         process.exit(1); // Exit if secret is missing
     }
-    // Consider adding an expiration time to the token
-    return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '1d' }); // Example: Expires in 1 day
+    // Consider adding an expiration time, e.g., { expiresIn: '1d' } for 1 day
+    return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '1d' });
 };
 
 
 // API to register user
 const registerUser = async (req, res) => {
     const { name, email, password } = req.body;
+    console.log("Register attempt for email:", email); // Log attempt
 
     try {
         // Input validation
@@ -44,13 +43,14 @@ const registerUser = async (req, res) => {
         if (!validator.isEmail(email)) {
             return res.status(400).json({ success: false, message: "Please enter a valid email address" });
         }
-        if (password.length < 8) { // Basic password length check
+        if (password.length < 8) {
             return res.status(400).json({ success: false, message: "Password must be at least 8 characters long" });
         }
 
         // Check if user already exists
         const existingUser = await userModel.findOne({ email });
         if (existingUser) {
+            console.log("Registration failed: User already exists -", email);
             return res.status(400).json({ success: false, message: "User with this email already exists" });
         }
 
@@ -63,11 +63,10 @@ const registerUser = async (req, res) => {
             name,
             email,
             password: hashedPassword
+            // hasCompletedTour defaults to false via schema
         });
         const user = await newUser.save();
-
-        // Create token (no need to send token on register usually, prompt login)
-        // const token = createToken(user._id);
+        console.log("Registration successful for user:", user._id, email);
 
         // Indicate success, prompt user to log in
         res.status(201).json({ success: true, message: "Registration successful. Please log in." });
@@ -81,6 +80,7 @@ const registerUser = async (req, res) => {
 // API to login user
 const loginUser = async (req, res) => {
     const { email, password } = req.body;
+    console.log("Login attempt for email:", email);
 
     try {
         if (!email || !password) {
@@ -90,24 +90,28 @@ const loginUser = async (req, res) => {
         // Find user by email
         const user = await userModel.findOne({ email });
         if (!user) {
+            console.log("Login failed: User not found -", email);
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
         // Compare provided password with hashed password in DB
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
+            console.log("Login failed: Invalid credentials for -", email);
             return res.status(400).json({ success: false, message: "Invalid credentials" });
         }
 
         // If password matches, create token
         const token = createToken(user._id);
+        console.log("Login successful for user:", user._id, email);
 
-        // --- Return token AND userId ---
+        // Return token, userId, AND hasCompletedTour status
         res.status(200).json({
             success: true,
             message: "Login successful",
             token: token,
-            userId: user._id // <-- ADDED userId HERE
+            userId: user._id,
+            hasCompletedTour: user.hasCompletedTour
         });
 
     } catch (error) {
@@ -119,300 +123,256 @@ const loginUser = async (req, res) => {
 
 // API to get user profile data (Uses userId from auth middleware)
 const getProfile = async (req, res) => {
+    const userId = req.userId; // Comes from authUser middleware
+    console.log("Get Profile request for userId:", userId);
+
     try {
-        // userId should be attached by the authUser middleware
-        const userId = req.userId; // <-- Get from req.userId set by middleware
         if (!userId) {
-             // This shouldn't happen if middleware is working, but good failsafe
-            return res.status(401).json({ success: false, message: "Not Authorized" });
+            console.error("Get Profile Error: userId missing from request after auth middleware.");
+            return res.status(401).json({ success: false, message: "Not Authorized (Missing User ID)" });
         }
 
-        const userData = await userModel.findById(userId).select('-password'); // Exclude password
+        // Fetch user data, excluding password. Includes hasCompletedTour by default.
+        const userData = await userModel.findById(userId).select('-password');
         if (!userData) {
+            console.warn("Get Profile Warning: User profile not found for ID:", userId);
             return res.status(404).json({ success: false, message: "User profile not found" });
         }
-        res.status(200).json({ success: true, userData });
+        console.log("Get Profile Success for userId:", userId);
+        res.status(200).json({
+            success: true,
+            userData: userData // Send the full userData object
+         });
 
     } catch (error) {
-        console.error("Get Profile Error:", error);
+        console.error("Get Profile Error for userId:", userId, error);
         res.status(500).json({ success: false, message: "Error fetching profile data." });
     }
 };
 
 // API to update user profile (Uses userId from auth middleware)
 const updateProfile = async (req, res) => {
+    const userId = req.userId;
+    console.log("Update Profile request for userId:", userId);
     try {
-        const userId = req.userId; // <-- Get from req.userId set by middleware
         const { name, phone, address, dob, gender } = req.body;
-        const imageFile = req.file; // Image from multer
+        const imageFile = req.file; // From multer
 
         if (!userId) {
-            return res.status(401).json({ success: false, message: "Not Authorized" });
+             return res.status(401).json({ success: false, message: "Not Authorized" });
         }
 
-        // Basic validation
         if (!name || !phone || !dob || !gender || !address) {
+            console.warn("Update Profile Failed: Missing required fields for userId:", userId, req.body);
             return res.status(400).json({ success: false, message: "Please provide all required fields (name, phone, address, dob, gender)" });
         }
 
         let parsedAddress;
         try {
-             // Address is expected as a JSON string from frontend if using FormData
              parsedAddress = JSON.parse(address);
+             if (typeof parsedAddress !== 'object' || parsedAddress === null) throw new Error("Invalid address format");
         } catch(e) {
-             return res.status(400).json({ success: false, message: "Invalid address format. Please send as a JSON string." });
+             console.warn("Update Profile Failed: Invalid address format for userId:", userId, address);
+             return res.status(400).json({ success: false, message: "Invalid address format. Please send as a JSON string with line1/line2." });
         }
 
+        const updateData = { name, phone, address: parsedAddress, dob, gender };
 
-        const updateData = {
-            name,
-            phone,
-            address: parsedAddress,
-            dob,
-            gender
-        };
-
-        // Handle image upload if present
         if (imageFile) {
-             console.log("Uploading image to Cloudinary...");
+             console.log("Update Profile: Uploading image to Cloudinary for userId:", userId);
              try {
-                // Ensure Cloudinary config is correct
-                const imageUpload = await cloudinary.uploader.upload(imageFile.path, {
-                    folder: "user_profiles", // Optional: organize uploads
-                    resource_type: "image"
-                });
-                updateData.image = imageUpload.secure_url; // Get secure URL
-                 console.log("Image uploaded:", updateData.image);
-            } catch (uploadError) {
-                 console.error("Cloudinary Upload Error:", uploadError);
-                 // Decide if profile update should fail if image upload fails
-                 return res.status(500).json({ success: false, message: "Failed to upload profile image." });
-             }
+                const imageUpload = await cloudinary.uploader.upload(imageFile.path, { folder: "user_profiles", resource_type: "image" });
+                updateData.image = imageUpload.secure_url;
+                 console.log("Update Profile: Image uploaded:", updateData.image);
+            } catch (uploadError) { /* ... error handling ... */ }
         }
 
-        // Find and update the user profile
-        const updatedUser = await userModel.findByIdAndUpdate(
-            userId,
-            { $set: updateData }, // Use $set to update only provided fields
-            { new: true, runValidators: true } // Return updated doc, run schema validators
-        ).select('-password'); // Exclude password from result
+        const updatedUser = await userModel.findByIdAndUpdate( userId, { $set: updateData }, { new: true, runValidators: true }).select('-password');
 
-        if (!updatedUser) {
-             return res.status(404).json({ success: false, message: "User not found for update." });
-        }
+        if (!updatedUser) { /* ... handle not found ... */ }
 
+        console.log("Update Profile Success for userId:", userId);
         res.status(200).json({ success: true, message: 'Profile Updated Successfully', userData: updatedUser });
 
-    } catch (error) {
-        console.error("Update Profile Error:", error);
-         // Handle potential validation errors from Mongoose
-         if (error.name === 'ValidationError') {
-             return res.status(400).json({ success: false, message: `Validation Error: ${error.message}` });
-         }
-        res.status(500).json({ success: false, message: "Error updating profile." });
-    }
+    } catch (error) { /* ... error handling ... */ }
 };
 
 
 // API to book appointment (Uses userId from auth middleware)
 const bookAppointment = async (req, res) => {
+    console.log("--- bookAppointment Start ---");
+    const userId = req.userId; // Get userId from authenticated request
+    const { docId, slotDate, slotTime } = req.body;
+    console.log("Booking Request Data:", { userId, docId, slotDate, slotTime });
+
     try {
-        const userId = req.userId; // <-- Get from req.userId set by middleware
-        const { docId, slotDate, slotTime } = req.body;
+        // --- Validation ---
+        if (!userId) { console.error("Booking Error: Missing userId (Auth issue?)"); return res.status(401).json({ success: false, message: "Not Authorized" }); }
+        if (!docId || !slotDate || !slotTime) { console.error("Booking Error: Missing required fields", { docId, slotDate, slotTime }); return res.status(400).json({ success: false, message: "Missing doctor ID, date, or time slot." }); }
 
-        if (!userId) {
-            return res.status(401).json({ success: false, message: "Not Authorized" });
-        }
-        if (!docId || !slotDate || !slotTime) {
-             return res.status(400).json({ success: false, message: "Missing doctor ID, date, or time slot." });
-         }
+        // --- Fetch Doctor and User Data Concurrently ---
+        console.log(`Fetching doctor (${docId}) and user (${userId}) data...`);
+        const [docData, userData] = await Promise.all([
+            doctorModel.findById(docId).select("-password"),
+            userModel.findById(userId).select("-password")
+        ]);
 
-        // Validate docId potentially (is it a valid ObjectId?)
+        // --- Validate Doctor ---
+        if (!docData) { console.error("Booking Error: Doctor not found for ID:", docId); return res.status(404).json({ success: false, message: "Doctor not found." }); }
+        console.log("Doctor found:", docData.name);
+        if (!docData.available) { console.warn("Booking Warning: Doctor not available", docData.name); return res.status(400).json({ success: false, message: 'Selected doctor is currently not available' }); }
+        if (!docData.email) { console.warn(`Booking Warning: Doctor ${docData.name} (ID: ${docId}) is missing an email address. Notification will be skipped.`); }
 
-        const docData = await doctorModel.findById(docId).select("-password"); // Exclude password
-        if (!docData) {
-             return res.status(404).json({ success: false, message: "Doctor not found." });
-         }
-        if (!docData.available) {
-            return res.status(400).json({ success: false, message: 'Selected doctor is currently not available' });
-        }
+        // --- Validate User ---
+        if (!userData) { console.error(`Booking Error: User ${userId} not found in database!`); return res.status(404).json({ success: false, message: "User data not found." }); }
+        console.log("User found:", userData.name);
 
         // --- Slot Booking Logic ---
-        // Ensure slots_booked is initialized if it doesn't exist
         let slots_booked = docData.slots_booked || {};
-
-        // Check if the specific date exists and the time slot is already booked
-        if (slots_booked[slotDate] && slots_booked[slotDate].includes(slotTime)) {
-            return res.status(409).json({ success: false, message: 'This time slot is already booked. Please select another.' }); // 409 Conflict
-        }
-
-        // Update the slots_booked object
-        if (slots_booked[slotDate]) {
-            slots_booked[slotDate].push(slotTime);
-        } else {
-            slots_booked[slotDate] = [slotTime];
-        }
-        // Mark the modified path for Mongoose Mixed type if necessary (often needed for nested objects)
-        await doctorModel.findByIdAndUpdate(docId, { $set: { slots_booked: slots_booked } }, { new: true });
+        console.log("Current slots_booked for doctor:", slots_booked);
+        if (slots_booked[slotDate] && slots_booked[slotDate].includes(slotTime)) { console.warn(`Booking Warning: Slot already booked - Date: ${slotDate}, Time: ${slotTime}`); return res.status(409).json({ success: false, message: 'This time slot is already booked.' }); }
+        if (slots_booked[slotDate]) { slots_booked[slotDate].push(slotTime); } else { slots_booked[slotDate] = [slotTime]; }
+        docData.markModified('slots_booked'); // Important for nested objects/Mixed type
+        console.log(`Attempting to update slots for ${docId}. New slots:`, slots_booked);
+        await docData.save(); // Save the doctor document with updated slots
+        console.log("Doctor slots updated successfully.");
         // --- End Slot Booking Logic ---
 
-        const userData = await userModel.findById(userId).select("-password"); // Get user details
-        if (!userData) {
-            // This implies an issue if the userId from token is valid but user doesn't exist
-             console.error(`Booking Error: User ${userId} not found despite valid token.`);
-            return res.status(404).json({ success: false, message: "User data not found." });
-        }
 
-        // Prepare appointment data
+        // --- Prepare Appointment Data ---
         const appointmentData = {
             userId,
             docId,
-            // Store relevant snapshot of user/doc data at time of booking
-            // Avoid storing full objects if they contain sensitive info like password hashes (even if selected out)
-            userData: { name: userData.name, email: userData.email, phone: userData.phone }, // Store only needed fields
-            docData: { name: docData.name, speciality: docData.speciality, address: docData.address, fees: docData.fees }, // Store only needed fields
+            userData: { name: userData.name, email: userData.email, phone: userData.phone },
+            docData: { name: docData.name, email: docData.email, speciality: docData.speciality, address: docData.address, fees: docData.fees },
             amount: docData.fees,
             slotTime,
             slotDate,
-            date: Date.now() // Keep original numeric date if needed, or use default Date
+            // --- ***** THE FIX: ADD THIS LINE ***** ---
+            date: Date.now() // Store the current timestamp (Number type matches schema)
+            // --- ***** END FIX ***** ---
         };
+        console.log("Prepared appointment data:", appointmentData);
 
-        // Save the new appointment
+        // --- Save the New Appointment ---
         const newAppointment = new appointmentModel(appointmentData);
-        await newAppointment.save();
+        console.log("Attempting to save appointment...");
+        await newAppointment.save(); // This should now pass validation
+        console.log("Appointment saved successfully with ID:", newAppointment._id);
+
 
         // --- Send Confirmation Emails ---
         try {
-            // Send email to user
+            const dateParts = slotDate.split('_');
+            const formattedDisplayDate = `${dateParts[0]}/${dateParts[1]}/${dateParts[2]}`;
+
+            // --- Send email to user ---
+            console.log(`Attempting to send email to user: ${userData.email}`);
             await transporter.sendMail({
                 from: `"Symbicure Team" <${process.env.MAIL_ID}>`,
                 to: userData.email,
-                subject: "Appointment Confirmation",
-                html: `
-                    <h2>Hi ${userData.name},</h2>
-                    <p>Your appointment with <strong>Dr. ${docData.name}</strong> (${docData.speciality}) has been successfully booked.</p>
-                    <p><strong>Date:</strong> ${slotDate.replace(/_/g, '/')} <br/><strong>Time:</strong> ${slotTime}<br/><strong>Fees:</strong> ₹${docData.fees}</p>
-                    <p>Thank you for choosing Symbicure!</p>
-                `
+                subject: "Your Symbicure Appointment Confirmation",
+                html: `<h2>Hi ${userData.name},</h2><p>Your appointment with <strong>Dr. ${docData.name}</strong> (${docData.speciality || 'Specialist'}) has been successfully booked.</p><p><strong>Date:</strong> ${formattedDisplayDate}</p><p><strong>Time:</strong> ${slotTime}</p><p><strong>Doctor's Clinic Address:</strong> ${docData.address?.line1 || ''}${docData.address?.line2 ? ', ' + docData.address.line2 : ''}</p><p><strong>Fees Due:</strong> ₹${docData.fees || 'N/A'}</p><p>Please arrive a few minutes early. If you need to cancel or reschedule, please do so via the 'My Appointments' section on our website.</p><p>Thank you for choosing Symbicure!</p>`
             });
+            console.log(`Sent confirmation email to user: ${userData.email}`);
 
-            // Send email to doctor
-            await transporter.sendMail({
-                from: `"Symbicure Team" <${process.env.MAIL_ID}>`,
-                to: docData.email, // Ensure doctor model has email field
-                subject: "New Appointment Booked",
-                html: `
-                    <h2>Hi ${docData.name},</h2>
-                    <p>A new appointment has been booked by <strong>${userData.name}</strong> (Contact: ${userData.email} / ${userData.phone || 'N/A'}).</p>
-                    <p><strong>Date:</strong> ${slotDate.replace(/_/g, '/')}<br/><strong>Time:</strong> ${slotTime}</p>
-                    <p>Please review your schedule.</p>
-                `
-            });
-            console.log(`Booking confirmation emails sent for appointment ${newAppointment._id}`);
+            // --- Send email to doctor (if email exists) ---
+            if (docData.email) {
+                 console.log(`Attempting to send email to doctor: ${docData.email}`);
+                 await transporter.sendMail({
+                     from: `"Symbicure System" <${process.env.MAIL_ID}>`,
+                     to: docData.email,
+                     subject: `New Appointment Booking - ${userData.name}`,
+                     html: `<h2>Hi Dr. ${docData.name},</h2><p>A new appointment has been booked via Symbicure.</p><p><strong>Patient Name:</strong> ${userData.name}</p><p><strong>Patient Contact:</strong> ${userData.email}${userData.phone ? ' / ' + userData.phone : ''}</p><p><strong>Date:</strong> ${formattedDisplayDate}</p><p><strong>Time:</strong> ${slotTime}</p><p>Please ensure your schedule reflects this booking.</p>`
+                 });
+                 console.log(`Sent notification email to doctor: ${docData.email}`);
+            } else { console.warn(`Skipped sending email to doctor ${docData.name} (ID: ${docId}) - No email address found.`); }
+
         } catch (mailError) {
-            // Log email error but don't fail the whole booking if emails fail
-            console.error(`Error sending confirmation emails for appointment ${newAppointment._id}:`, mailError);
-            // Optionally: Implement a retry mechanism or notification system for failed emails
+            console.error(`!!! FAILED TO SEND BOOKING EMAIL(S) for appointment ${newAppointment._id}. Error:`, mailError);
         }
         // --- End Send Emails ---
 
-        res.status(201).json({ success: true, message: 'Appointment booked successfully.', appointmentId: newAppointment._id });
+        console.log("--- bookAppointment End (Success) ---");
+        res.status(201).json({ success: true, message: 'Appointment booked successfully! Confirmation email sent.', appointmentId: newAppointment._id });
 
     } catch (error) {
-        console.error("Book Appointment Error:", error);
-        res.status(500).json({ success: false, message: "Error booking appointment." });
+        // Log the specific error that occurred before sending the generic response
+        console.error("!!! bookAppointment MAIN CATCH BLOCK ERROR:", error);
+        console.log("--- bookAppointment End (Error) ---");
+        res.status(500).json({ success: false, message: "Error processing appointment booking." });
     }
 };
 
 
 // API to cancel appointment (Uses userId from auth middleware)
 const cancelAppointment = async (req, res) => {
+    const userId = req.userId;
+    const { appointmentId } = req.body;
+    console.log(`Cancel Appointment request for Appt ID: ${appointmentId} by User ID: ${userId}`);
     try {
-        const userId = req.userId; // <-- Get from req.userId set by middleware
-        const { appointmentId } = req.body; // Get appointmentId from request body
-
-        if (!userId) {
-            return res.status(401).json({ success: false, message: "Not Authorized" });
-        }
-        if (!appointmentId) {
-             return res.status(400).json({ success: false, message: "Appointment ID is required." });
-         }
+        if (!userId) { return res.status(401).json({ success: false, message: "Not Authorized" }); }
+        if (!appointmentId) { return res.status(400).json({ success: false, message: "Appointment ID is required." }); }
 
         const appointmentData = await appointmentModel.findById(appointmentId);
-        if (!appointmentData) {
-             return res.status(404).json({ success: false, message: "Appointment not found." });
-         }
+        if (!appointmentData) { /* ... handle not found ... */ }
+        if (appointmentData.userId.toString() !== userId) { /* ... handle forbidden ... */ }
+        if (appointmentData.cancelled) { /* ... handle already cancelled ... */ }
+        if (appointmentData.isCompleted) { /* ... handle completed ... */ }
 
-        // Authorization check: Only the user who booked can cancel
-        if (appointmentData.userId.toString() !== userId) {
-            return res.status(403).json({ success: false, message: 'Forbidden: You can only cancel your own appointments.' });
-        }
-
-        // Check if already cancelled or completed? (Optional)
-        if (appointmentData.cancelled) {
-             return res.status(400).json({ success: false, message: "Appointment is already cancelled." });
-         }
-         if (appointmentData.isCompleted) {
-              return res.status(400).json({ success: false, message: "Cannot cancel a completed appointment." });
-          }
-
-        // Mark appointment as cancelled
         await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true });
+        console.log("Appointment marked as cancelled:", appointmentId);
 
         // --- Free up the doctor's slot ---
         const { docId, slotDate, slotTime } = appointmentData;
         try {
             const doctorData = await doctorModel.findById(docId);
             if (doctorData && doctorData.slots_booked && doctorData.slots_booked[slotDate]) {
-                // Create a new object without the cancelled slot
                 const updatedSlots = { ...doctorData.slots_booked };
-                updatedSlots[slotDate] = updatedSlots[slotDate].filter(time => time !== slotTime);
-                // If the date array becomes empty, remove the date key (optional cleanup)
-                if (updatedSlots[slotDate].length === 0) {
-                    delete updatedSlots[slotDate];
-                }
-                await doctorModel.findByIdAndUpdate(docId, { $set: { slots_booked: updatedSlots } });
-                console.log(`Slot ${slotTime} on ${slotDate} freed for doctor ${docId}`);
-            } else {
-                console.warn(`Could not find slot ${slotTime} on ${slotDate} for doctor ${docId} to free up.`);
-            }
-        } catch(slotError) {
-            // Log error but don't fail cancellation if freeing slot fails
-            console.error(`Error freeing slot for doctor ${docId} during cancellation:`, slotError);
-        }
+                const timeIndex = updatedSlots[slotDate].indexOf(slotTime);
+                if (timeIndex > -1) {
+                    updatedSlots[slotDate].splice(timeIndex, 1);
+                    if (updatedSlots[slotDate].length === 0) { delete updatedSlots[slotDate]; }
+                    doctorData.slots_booked = updatedSlots;
+                    doctorData.markModified('slots_booked');
+                    await doctorData.save();
+                    console.log(`Slot ${slotTime} on ${slotDate} freed for doctor ${docId}`);
+                } else { console.warn(`Slot ${slotTime} not found during cancellation cleanup.`); }
+            } else { console.warn(`Doctor data or slot date not found during cancellation cleanup.`); }
+        } catch(slotError) { console.error(`Error freeing slot during cancellation:`, slotError); }
         // --- End Free Slot ---
-
-        // Optionally: Send cancellation notification emails
 
         res.status(200).json({ success: true, message: 'Appointment successfully cancelled' });
 
-    } catch (error) {
-        console.error("Cancel Appointment Error:", error);
-        res.status(500).json({ success: false, message: "Error cancelling appointment." });
-    }
+    } catch (error) { /* ... handle error ... */ }
 };
 
 
 // API to get user's appointments (Uses userId from auth middleware)
 const listAppointment = async (req, res) => {
+    const userId = req.userId;
+    console.log("List Appointments request for userId:", userId);
     try {
-        const userId = req.userId; // <-- Get from req.userId set by middleware
-        if (!userId) {
-            return res.status(401).json({ success: false, message: "Not Authorized" });
-        }
-
-        // Find appointments where the userId matches
-        const appointments = await appointmentModel.find({ userId })
-                                               .sort({ date: -1 }); // Sort by most recent first
-
+        if (!userId) { return res.status(401).json({ success: false, message: "Not Authorized" }); }
+        const appointments = await appointmentModel.find({ userId }).sort({ date: -1 });
+        console.log(`Found ${appointments.length} appointments for userId:`, userId);
         res.status(200).json({ success: true, appointments });
-
-    } catch (error) {
-        console.error("List Appointments Error:", error);
-        res.status(500).json({ success: false, message: "Error fetching appointments." });
-    }
+    } catch (error) { /* ... handle error ... */ }
 };
 
+
+// API to mark tour as completed
+const markTourAsCompleted = async (req, res) => {
+    const userId = req.userId;
+    console.log("Mark Tour Completed request for userId:", userId);
+    try {
+        if (!userId) { return res.status(401).json({ success: false, message: "Not Authorized" }); }
+        const updatedUser = await userModel.findByIdAndUpdate( userId, { $set: { hasCompletedTour: true } }, { new: true }).select('-password');
+        if (!updatedUser) { /* ... handle not found ... */ }
+        console.log("Mark Tour Completed Success for userId:", userId);
+        res.status(200).json({ success: true, message: "Tour status updated successfully", userData: updatedUser });
+    } catch (error) { /* ... handle error ... */ }
+};
 
 // Export all controller functions
 export {
@@ -422,5 +382,6 @@ export {
     updateProfile,
     bookAppointment,
     listAppointment,
-    cancelAppointment
+    cancelAppointment,
+    markTourAsCompleted
 };

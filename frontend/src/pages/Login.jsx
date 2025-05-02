@@ -5,23 +5,23 @@ import { toast } from 'react-toastify';
 import { useNavigate } from 'react-router-dom';
 
 const Login = () => {
-    const [state, setState] = useState('Login'); // Default to Login
+    const [state, setState] = useState('Login');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false); // Add loading state
+    const [loading, setLoading] = useState(false);
 
     const navigate = useNavigate();
-    // --- Get setUserId from context ---
-    const { backendUrl, token, setToken, setUserId, loadUserProfileData } = useContext(AppContext);
+    // Only need setToken and setUserId here, AppContext handles loading profile
+    const { backendUrl, token, setToken, setUserId } = useContext(AppContext);
 
     const onSubmitHandler = async (event) => {
         event.preventDefault();
         if (!backendUrl) {
-            toast.error("Backend URL not configured. Cannot proceed.");
+            toast.error("Backend URL not configured.");
             return;
         }
-        setLoading(true); // Start loading
+        setLoading(true);
 
         let url;
         let payload;
@@ -29,7 +29,7 @@ const Login = () => {
         if (state === 'Sign Up') {
             url = backendUrl + '/api/user/register';
             payload = { name, email, password };
-        } else {
+        } else { // Login state
             url = backendUrl + '/api/user/login';
             payload = { email, password };
         }
@@ -38,81 +38,88 @@ const Login = () => {
             const { data } = await axios.post(url, payload);
 
             if (data.success) {
-                localStorage.setItem('token', data.token);
-                setToken(data.token); // Update context
-
-                // --- Handle userId for LOGIN ---
-                if (state === 'Login' && data.userId) {
-                    localStorage.setItem('userId', data.userId);
-                    setUserId(data.userId); // Update context state
-                     // Optionally trigger profile load immediately, though context effect should handle it
-                     // await loadUserProfileData(data.token);
-                    toast.success("Login Successful!");
-                    navigate('/'); // Navigate after successful login/signup and state update
-                } else if (state === 'Sign Up') {
-                     // For sign up, we might need to log in again or load profile separately
-                     // For simplicity, let's prompt login or automatically log in if backend supports it
+                // --- Handle Sign Up Success ---
+                if (state === 'Sign Up') {
                      toast.success("Registration Successful! Please Login.");
-                     setState('Login'); // Switch to login view after signup
-                     // Clear fields for login form
-                     // setName(''); setEmail(''); setPassword('');
-                     // Alternatively, if register endpoint also returns userId:
-                     // if(data.userId) { localStorage.setItem('userId', data.userId); setUserId(data.userId); }
+                     setState('Login');
+                     setPassword('');
+                     // Don't log in automatically, force user to log in
+                }
+                // --- Handle Login Success ---
+                else if (state === 'Login' && data.token && data.userId) {
+                    console.log("[Login.jsx] Login API Success. Token received.");
+                    // 1. Store token & userId in localStorage FIRST
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('userId', data.userId);
+
+                    // 2. Update context state. This will trigger AppContext's useEffect
+                    console.log("[Login.jsx] Calling setToken and setUserId...");
+                    setToken(data.token);
+                    setUserId(data.userId); // Set userId in context as well
+
+                    // 3. Navigate IMMEDIATELY. AppContext effect will handle profile load.
+                    console.log("[Login.jsx] Navigating to / ...");
+                    toast.success("Login Successful!"); // Toast before navigate can be better UX
+                    navigate('/');
+
                 } else {
-                    // Handle case where login succeeded but userId wasn't returned (shouldn't happen with backend fix)
-                    console.warn("Login successful but userId missing from response.");
-                     toast.warn("Login partially successful. User info might be incomplete.");
-                     // Try loading profile to get ID as fallback
-                     await loadUserProfileData(data.token);
-                     navigate('/');
+                    console.warn("[Login.jsx] Login API success but token/userId missing:", data);
+                    toast.error("Login failed: Incomplete server response.");
                 }
 
-            } else {
-                toast.error(data.message || "An error occurred.");
+            } else { // Handle API success: false
+                toast.error(data.message || "Login failed. Please check credentials.");
             }
         } catch (error) {
-            console.error(`Error during ${state}:`, error);
-            toast.error(error.response?.data?.message || "Operation failed. Please try again.");
+            console.error(`[Login.jsx] Error during ${state}:`, error.response || error);
+            if (error.response?.status === 400 || error.response?.status === 401 || error.response?.status === 404) {
+                 toast.error(error.response.data?.message || "Invalid credentials or user not found.");
+            } else {
+                 toast.error("Login failed. Connection or server error.");
+            }
         } finally {
-            setLoading(false); // Stop loading
+            setLoading(false);
         }
     };
 
-    // Redirect if already logged in
+    // Redirect if already logged in (checks context token)
     useEffect(() => {
         if (token) {
+            console.log("[Login.jsx] Token found in context on mount, redirecting...");
             navigate('/');
         }
     }, [token, navigate]);
 
+    // --- JSX Structure ---
     return (
-        <form onSubmit={onSubmitHandler} className='min-h-[80vh] flex items-center'>
-            <div className='flex flex-col gap-3 m-auto items-start p-8 min-w-[340px] sm:min-w-96 border rounded-xl text-[#5E5E5E] text-sm shadow-lg'>
-                <p className='text-2xl font-semibold'>{state === 'Sign Up' ? 'Create Account' : 'Login'}</p>
-                <p>Please {state === 'Sign Up' ? 'sign up' : 'log in'} to book appointment</p>
-                {state === 'Sign Up' && ( // Use conditional rendering shorthand
-                    <div className='w-full '>
-                        <p>Full Name</p>
-                        <input onChange={(e) => setName(e.target.value)} value={name} className='border border-[#DADADA] rounded w-full p-2 mt-1' type="text" required />
+         <div className='min-h-[calc(80vh-100px)] flex items-center justify-center py-10'>
+            <form onSubmit={onSubmitHandler} className='w-full max-w-md bg-white p-8 border rounded-xl shadow-lg flex flex-col gap-5'>
+                <h2 className='text-3xl font-semibold text-gray-800 text-center mb-2'>{state}</h2>
+                {state === 'Sign Up' && (
+                    <div className='w-full'>
+                        <label className='block text-sm font-medium text-gray-700 mb-1'>Full Name</label>
+                        <input onChange={(e) => setName(e.target.value)} value={name} className='w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary' type="text" required />
                     </div>
                 )}
-                <div className='w-full '>
-                    <p>Email</p>
-                    <input onChange={(e) => setEmail(e.target.value)} value={email} className='border border-[#DADADA] rounded w-full p-2 mt-1' type="email" required />
+                <div className='w-full'>
+                     <label className='block text-sm font-medium text-gray-700 mb-1'>Email</label>
+                    <input onChange={(e) => setEmail(e.target.value)} value={email} className='w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary' type="email" required />
                 </div>
-                <div className='w-full '>
-                    <p>Password</p>
-                    <input onChange={(e) => setPassword(e.target.value)} value={password} className='border border-[#DADADA] rounded w-full p-2 mt-1' type="password" required />
+                <div className='w-full'>
+                     <label className='block text-sm font-medium text-gray-700 mb-1'>Password</label>
+                    <input onChange={(e) => setPassword(e.target.value)} value={password} className='w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary' type="password" required />
                 </div>
-                <button type="submit" disabled={loading} className='bg-primary text-white w-full py-2 my-2 rounded-md text-base disabled:bg-gray-400'>
-                    {loading ? 'Processing...' : (state === 'Sign Up' ? 'Create account' : 'Login')}
+                <button type="submit" disabled={loading} className='w-full bg-primary text-white py-2.5 mt-2 rounded-md text-base font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'>
+                    {loading ? 'Processing...' : (state === 'Sign Up' ? 'Create Account' : 'Login')}
                 </button>
-                {state === 'Sign Up'
-                    ? <p>Already have an account? <span onClick={() => !loading && setState('Login')} className={`text-primary underline ${loading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>Login here</span></p>
-                    : <p>Create a new account? <span onClick={() => !loading && setState('Sign Up')} className={`text-primary underline ${loading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>Click here</span></p>
-                }
-            </div>
-        </form>
+                <p className='text-sm text-center w-full text-gray-600 mt-2'>
+                    {state === 'Sign Up'
+                        ? <>Already have an account? <span onClick={() => !loading && setState('Login')} className={`text-primary font-medium underline ${loading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>Login here</span></>
+                        : <>Don't have an account? <span onClick={() => !loading && setState('Sign Up')} className={`text-primary font-medium underline ${loading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>Create one</span></>
+                    }
+                </p>
+            </form>
+        </div>
     );
 };
 

@@ -1,4 +1,5 @@
 import appointment_img from './appointment_img.png'
+import default_avatar_img from './default_avatar.png'; 
 import header_img from './header_img.png'
 import group_profiles from './group_profiles.png'
 import profile_pic from './profile_pic.png'
@@ -39,6 +40,7 @@ import Pediatricians from './Pediatricians.svg'
 
 
 export const assets = {
+    default_avatar: default_avatar_img,
     appointment_img,
     header_img,
     group_profiles,
