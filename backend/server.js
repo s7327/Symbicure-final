@@ -34,34 +34,25 @@ const port = process.env.PORT || 4000;
 
 // --- Define Allowed Origins ---
 const allowedOrigins = [
-    "http://localhost:5173",                                   
-    "http://localhost:5174",                                   
+    "http://localhost:5173",
+    "http://localhost:5174",
     "https://symbicure-final.vercel.app",
     "https://symbicure-final-admin.vercel.app",
     "https://symbicure-final.onrender.com"
 ];
 
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", allowedOrigins.includes(req.headers.origin) ? req.headers.origin : "");
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Origin,X-Requested-With,Content-Type,Accept,Authorization");
 
-
-
-// --- Middlewares ---
-app.use(express.json());
-
-// --- Configure CORS for Express API routes ---
-app.use(cors({
-    origin: function (origin, callback) {
-        // Allow requests with no origin (e.g., curl requests) or if origin is in the whitelist
-        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true); // Origin is allowed
-        } else {
-            console.warn(`CORS blocked for origin: ${origin}`);
-            callback(new Error('This origin is not allowed by CORS')); // Origin is blocked
-        }
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"], // Allow necessary HTTP methods
-    credentials: true // Allow credentials (cookies, headers, etc.)
-}));
-
+    // Handle preflight OPTIONS
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+    }
+    next();
+});
 // Create HTTP server integrating Express app
 const server = http.createServer(app);
 
